@@ -121,30 +121,38 @@ export default function StockChart({ candles, earningsMarkers = [] }: Props) {
     series.setData(data);
 
     if (earningsMarkers.length > 0) {
-      const sortedTimes = candles.map((c) => c.time).sort();
-      const resolved = earningsMarkers
+      const candleTimes = new Set(candles.map((c) => c.time));
+      const sortedCandleTimes = [...candleTimes].sort();
+
+      const markerData = earningsMarkers
         .map((m) => {
+          // find exact match or nearest prior candle
           let time = m.time;
-          if (!sortedTimes.includes(time)) {
-            const nearest = sortedTimes.findLast((t) => t <= time) ?? sortedTimes[0];
+          if (!candleTimes.has(time)) {
+            let nearest = "";
+            for (let i = sortedCandleTimes.length - 1; i >= 0; i--) {
+              if (sortedCandleTimes[i] <= time) { nearest = sortedCandleTimes[i]; break; }
+            }
             if (!nearest) return null;
             time = nearest;
           }
-          return { time, beat: m.beat, text: markerText(m) };
+          return { time, beat: m.beat, beforeChange: m.beforeChange, afterChange: m.afterChange };
         })
-        .filter((m): m is { time: string; beat: boolean | null; text: string } => m !== null);
+        .filter((m): m is NonNullable<typeof m> => m !== null);
 
-      createSeriesMarkers(
-        series,
-        resolved.map((m) => ({
-          time: m.time as Time,
-          position: "aboveBar" as const,
-          color: m.beat === true ? "#34d399" : m.beat === false ? "#f87171" : "#a1a1aa",
-          shape: "circle" as const,
-          text: m.text,
-          size: 1,
-        }))
-      );
+      if (markerData.length > 0) {
+        createSeriesMarkers(
+          series,
+          markerData.map((m) => ({
+            time: m.time as Time,
+            position: "aboveBar" as const,
+            color: m.beat === true ? "#34d399" : m.beat === false ? "#f87171" : "#a1a1aa",
+            shape: "circle" as const,
+            text: markerText(m),
+            size: 2,
+          }))
+        );
+      }
     }
 
     chartRef.current = chart;
