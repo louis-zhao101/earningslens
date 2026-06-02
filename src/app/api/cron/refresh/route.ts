@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { syncCompany } from "@/lib/sync";
+import { bust } from "@/lib/redis";
 
 export const maxDuration = 300;
 
@@ -18,11 +19,18 @@ export async function GET(request: NextRequest) {
   for (const { ticker } of companies) {
     try {
       await syncCompany(ticker);
+      await bust(
+        `company:${ticker}:earnings`,
+        `company:${ticker}:financials`,
+        `company:${ticker}:prices`,
+      );
       results.push({ ticker, ok: true });
     } catch (err) {
       results.push({ ticker, ok: false, error: err instanceof Error ? err.message : String(err) });
     }
   }
+
+  await bust("home:upcoming", "home:recent", "calendar");
 
   return Response.json({ refreshed: results.length, results });
 }

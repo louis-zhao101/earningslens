@@ -12,15 +12,28 @@ function createRedis(): Redis | null {
 export const redis = globalForRedis.redis ?? createRedis();
 if (process.env.NODE_ENV !== "production") globalForRedis.redis = redis;
 
+const PREFIX = "el:";
+
+function serialize(value: unknown): string {
+  return JSON.stringify(value, (_, v) =>
+    typeof v === "bigint" ? Number(v) : v
+  );
+}
+
 export async function cached<T>(
   key: string,
   ttlSeconds: number,
   fn: () => Promise<T>
 ): Promise<T> {
   if (!redis) return fn();
-  const hit = await redis.get<T>(key);
-  if (hit != null) return hit;
+  const raw = await redis.get<string>(PREFIX + key);
+  if (raw != null) return JSON.parse(raw) as T;
   const result = await fn();
-  await redis.setex(key, ttlSeconds, result);
+  await redis.setex(PREFIX + key, ttlSeconds, serialize(result));
   return result;
+}
+
+export async function bust(...keys: string[]): Promise<void> {
+  if (!redis || keys.length === 0) return;
+  await redis.del(...keys.map((k) => PREFIX + k));
 }

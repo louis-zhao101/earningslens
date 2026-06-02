@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { cached } from "@/lib/redis";
 import { formatDate, formatEPS, formatPct, surpriseColor } from "@/lib/format";
 import Link from "next/link";
 import { Calendar } from "lucide-react";
@@ -9,20 +10,22 @@ export const metadata: Metadata = {
 };
 
 async function getCalendarEvents() {
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-  const sixtyDaysAhead = new Date();
-  sixtyDaysAhead.setDate(sixtyDaysAhead.getDate() + 60);
+  return cached("calendar", 3600, () => {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const sixtyDaysAhead = new Date();
+    sixtyDaysAhead.setDate(sixtyDaysAhead.getDate() + 60);
 
-  return prisma.earningsEvent.findMany({
-    where: {
-      reportDate: { gte: thirtyDaysAgo, lte: sixtyDaysAhead },
-    },
-    include: {
-      company: { select: { ticker: true, name: true, sector: true, marketCap: true } },
-    },
-    orderBy: { reportDate: "asc" },
-  }).catch(() => []);
+    return prisma.earningsEvent.findMany({
+      where: {
+        reportDate: { gte: thirtyDaysAgo, lte: sixtyDaysAhead },
+      },
+      include: {
+        company: { select: { ticker: true, name: true, sector: true, marketCap: true } },
+      },
+      orderBy: { reportDate: "asc" },
+    }).catch(() => []);
+  });
 }
 
 export default async function CalendarPage() {

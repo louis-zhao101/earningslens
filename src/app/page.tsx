@@ -1,34 +1,39 @@
 import { TrendingUp, Calendar, BarChart2 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
+import { cached } from "@/lib/redis";
 import SearchBar from "@/components/SearchBar";
 import { formatDate, formatEPS, formatPct, surpriseColor } from "@/lib/format";
 import Link from "next/link";
 
 async function getUpcomingEarnings() {
-  return prisma.earningsEvent.findMany({
-    where: {
-      isUpcoming: true,
-      reportDate: { gte: new Date() },
-    },
-    include: { company: { select: { ticker: true, name: true, sector: true } } },
-    orderBy: { reportDate: "asc" },
-    take: 10,
-  }).catch(() => []);
+  return cached("home:upcoming", 1800, () =>
+    prisma.earningsEvent.findMany({
+      where: {
+        isUpcoming: true,
+        reportDate: { gte: new Date() },
+      },
+      include: { company: { select: { ticker: true, name: true, sector: true } } },
+      orderBy: { reportDate: "asc" },
+      take: 10,
+    }).catch(() => [])
+  );
 }
 
 async function getRecentEarnings() {
   const weekAgo = new Date();
   weekAgo.setDate(weekAgo.getDate() - 7);
-  return prisma.earningsEvent.findMany({
-    where: {
-      isUpcoming: false,
-      isConfirmed: true,
-      reportDate: { gte: weekAgo, lte: new Date() },
-    },
-    include: { company: { select: { ticker: true, name: true, sector: true } } },
-    orderBy: { reportDate: "desc" },
-    take: 10,
-  }).catch(() => []);
+  return cached("home:recent", 1800, () =>
+    prisma.earningsEvent.findMany({
+      where: {
+        isUpcoming: false,
+        isConfirmed: true,
+        reportDate: { gte: weekAgo, lte: new Date() },
+      },
+      include: { company: { select: { ticker: true, name: true, sector: true } } },
+      orderBy: { reportDate: "desc" },
+      take: 10,
+    }).catch(() => [])
+  );
 }
 
 export default async function Home() {

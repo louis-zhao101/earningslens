@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { syncCompany } from "@/lib/sync";
+import { cached } from "@/lib/redis";
 import CompanyHeader from "@/components/CompanyHeader";
 import EarningsTable from "@/components/EarningsTable";
 import FinancialsTable from "@/components/FinancialsTable";
@@ -24,28 +25,34 @@ async function getCompany(ticker: string) {
   }).catch(() => null);
 }
 
-async function getEarnings(companyId: string) {
-  return prisma.earningsEvent.findMany({
-    where: { companyId },
-    orderBy: { reportDate: "desc" },
-    take: 20,
-  }).catch(() => []);
+async function getEarnings(ticker: string, companyId: string) {
+  return cached(`company:${ticker}:earnings`, 3600, () =>
+    prisma.earningsEvent.findMany({
+      where: { companyId },
+      orderBy: { reportDate: "desc" },
+      take: 20,
+    }).catch(() => [])
+  );
 }
 
-async function getFinancials(companyId: string) {
-  return prisma.financialStatement.findMany({
-    where: { companyId, period: "quarter" },
-    orderBy: [{ fiscalYear: "desc" }, { fiscalQuarter: "desc" }],
-    take: 8,
-  }).catch(() => []);
+async function getFinancials(ticker: string, companyId: string) {
+  return cached(`company:${ticker}:financials`, 3600, () =>
+    prisma.financialStatement.findMany({
+      where: { companyId, period: "quarter" },
+      orderBy: [{ fiscalYear: "desc" }, { fiscalQuarter: "desc" }],
+      take: 8,
+    }).catch(() => [])
+  );
 }
 
-async function getPrices(companyId: string) {
-  return prisma.stockPrice.findMany({
-    where: { companyId },
-    orderBy: { date: "asc" },
-    select: { date: true, open: true, high: true, low: true, close: true },
-  }).catch(() => []);
+async function getPrices(ticker: string, companyId: string) {
+  return cached(`company:${ticker}:prices`, 3600, () =>
+    prisma.stockPrice.findMany({
+      where: { companyId },
+      orderBy: { date: "asc" },
+      select: { date: true, open: true, high: true, low: true, close: true },
+    }).catch(() => [])
+  );
 }
 
 export default async function CompanyPage({ params }: Props) {
@@ -64,9 +71,9 @@ export default async function CompanyPage({ params }: Props) {
   if (!company) notFound();
 
   const [earnings, financials, prices] = await Promise.all([
-    getEarnings(company.id),
-    getFinancials(company.id),
-    getPrices(company.id),
+    getEarnings(upper, company.id),
+    getFinancials(upper, company.id),
+    getPrices(upper, company.id),
   ]);
 
   const candles = prices.map((p: { date: Date; open: number; high: number; low: number; close: number }) => ({
