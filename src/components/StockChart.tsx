@@ -121,18 +121,29 @@ export default function StockChart({ candles, earningsMarkers = [] }: Props) {
     series.setData(data);
 
     if (earningsMarkers.length > 0) {
+      const sortedTimes = candles.map((c) => c.time).sort();
+      const resolved = earningsMarkers
+        .map((m) => {
+          let time = m.time;
+          if (!sortedTimes.includes(time)) {
+            const nearest = sortedTimes.findLast((t) => t <= time) ?? sortedTimes[0];
+            if (!nearest) return null;
+            time = nearest;
+          }
+          return { time, beat: m.beat, text: markerText(m) };
+        })
+        .filter((m): m is { time: string; beat: boolean | null; text: string } => m !== null);
+
       createSeriesMarkers(
         series,
-        earningsMarkers
-          .filter((m) => candles.some((c) => c.time === m.time))
-          .map((m) => ({
-            time: m.time as Time,
-            position: "belowBar" as const,
-            color: m.beat === true ? "#34d399" : m.beat === false ? "#f87171" : "#a1a1aa",
-            shape: "arrowUp" as const,
-            text: markerText(m),
-            size: 1,
-          }))
+        resolved.map((m) => ({
+          time: m.time as Time,
+          position: "aboveBar" as const,
+          color: m.beat === true ? "#34d399" : m.beat === false ? "#f87171" : "#a1a1aa",
+          shape: "circle" as const,
+          text: m.text,
+          size: 1,
+        }))
       );
     }
 
