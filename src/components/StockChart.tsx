@@ -21,6 +21,8 @@ interface Candle {
 interface EarningsMarker {
   time: string;
   beat: boolean | null;
+  beforeChange: number | null;
+  afterChange: number | null;
 }
 
 interface Props {
@@ -28,15 +30,14 @@ interface Props {
   earningsMarkers?: EarningsMarker[];
 }
 
-const TIME_FRAMES = ["1D", "1W", "1M", "3M", "6M", "1YR", "2YR", "5YR", "YTD"] as const;
+const TIME_FRAMES = ["1M", "3M", "6M", "1YR", "2YR", "5YR", "YTD"] as const;
 type TimeFrame = typeof TIME_FRAMES[number];
+const DEFAULT_TF: TimeFrame = "1YR";
 
 function getFromDate(tf: TimeFrame): string {
   const now = new Date();
   const d = new Date(now);
   switch (tf) {
-    case "1D":  d.setDate(d.getDate() - 1); break;
-    case "1W":  d.setDate(d.getDate() - 7); break;
     case "1M":  d.setMonth(d.getMonth() - 1); break;
     case "3M":  d.setMonth(d.getMonth() - 3); break;
     case "6M":  d.setMonth(d.getMonth() - 6); break;
@@ -59,11 +60,26 @@ function applyTimeFrame(chart: IChartApi, candles: Candle[], tf: TimeFrame) {
   });
 }
 
+function fmtChange(val: number | null): string {
+  if (val == null) return "";
+  const sign = val >= 0 ? "+" : "";
+  return `${sign}${val.toFixed(1)}%`;
+}
+
+function markerText(m: EarningsMarker): string {
+  const pre = fmtChange(m.beforeChange);
+  const post = fmtChange(m.afterChange);
+  if (pre && post) return `${pre} → ${post}`;
+  if (post) return post;
+  if (pre) return pre;
+  return "";
+}
+
 export default function StockChart({ candles, earningsMarkers = [] }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const [timeFrame, setTimeFrame] = useState<TimeFrame>("1W");
+  const [timeFrame, setTimeFrame] = useState<TimeFrame>(DEFAULT_TF);
 
   useEffect(() => {
     if (!containerRef.current || candles.length === 0) return;
@@ -82,7 +98,7 @@ export default function StockChart({ candles, earningsMarkers = [] }: Props) {
       rightPriceScale: { borderColor: "#3f3f46" },
       timeScale: { borderColor: "#3f3f46", timeVisible: true },
       width: containerRef.current.clientWidth,
-      height: 340,
+      height: 380,
     });
 
     const series = chart.addSeries(CandlestickSeries, {
@@ -111,10 +127,10 @@ export default function StockChart({ candles, earningsMarkers = [] }: Props) {
           .filter((m) => candles.some((c) => c.time === m.time))
           .map((m) => ({
             time: m.time as Time,
-            position: "aboveBar" as const,
+            position: "belowBar" as const,
             color: m.beat === true ? "#34d399" : m.beat === false ? "#f87171" : "#a1a1aa",
-            shape: "circle" as const,
-            text: "E",
+            shape: "arrowUp" as const,
+            text: markerText(m),
             size: 1,
           }))
       );
@@ -141,7 +157,6 @@ export default function StockChart({ candles, earningsMarkers = [] }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candles, earningsMarkers]);
 
-  // Update visible range when time frame changes (without recreating chart)
   useEffect(() => {
     if (chartRef.current) {
       applyTimeFrame(chartRef.current, candles, timeFrame);
@@ -150,7 +165,7 @@ export default function StockChart({ candles, earningsMarkers = [] }: Props) {
 
   if (candles.length === 0) {
     return (
-      <div className="flex h-[340px] items-center justify-center text-sm text-zinc-500">
+      <div className="flex h-[380px] items-center justify-center text-sm text-zinc-500">
         No price data available.
       </div>
     );

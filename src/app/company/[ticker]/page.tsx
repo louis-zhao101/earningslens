@@ -86,10 +86,33 @@ export default async function CompanyPage({ params }: Props) {
 
   const earningsMarkers = earnings
     .filter((e) => e.isConfirmed)
-    .map((e) => ({
-      time: e.reportDate.toISOString().split("T")[0],
-      beat: e.epsSurprisePct != null ? e.epsSurprisePct > 0 : null,
-    }));
+    .map((e) => {
+      const dateStr = new Date(e.reportDate as Date | string).toISOString().split("T")[0];
+
+      // Find the candle on or after the earnings date
+      let idx = candles.findIndex((c) => c.time >= dateStr);
+      if (idx === -1) idx = candles.length - 1;
+
+      const earningsClose = candles[idx]?.close ?? null;
+      const beforeClose = candles[Math.max(0, idx - 5)]?.close ?? null;
+      const afterClose = candles[Math.min(candles.length - 1, idx + 5)]?.close ?? null;
+
+      const beforeChange =
+        earningsClose != null && beforeClose != null && beforeClose !== 0 && idx >= 5
+          ? ((earningsClose - beforeClose) / beforeClose) * 100
+          : null;
+      const afterChange =
+        earningsClose != null && afterClose != null && earningsClose !== 0 && idx + 5 < candles.length
+          ? ((afterClose - earningsClose) / earningsClose) * 100
+          : null;
+
+      return {
+        time: dateStr,
+        beat: e.epsSurprisePct != null ? e.epsSurprisePct > 0 : null,
+        beforeChange,
+        afterChange,
+      };
+    });
 
   return (
     <div className="flex flex-col flex-1 bg-zinc-900">
