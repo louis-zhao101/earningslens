@@ -1,15 +1,34 @@
-import { fmp } from "@/lib/fmp";
-import { prisma } from "@/lib/prisma";
+import * as dotenv from "dotenv";
+import * as path from "path";
+
+// Must load env before any module that reads process.env
+dotenv.config({ path: path.resolve(__dirname, "../.env.local") });
+
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { fmp } from "../src/lib/fmp";
+import { SP500_TICKERS } from "./sp500-tickers";
+
+const PRICE_FROM = "2021-01-01";
+const DELAY_MS = 500; // 120 req/min — well within FMP Starter limits
+
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
+const prisma = new PrismaClient({ adapter });
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 function quarterFromPeriod(period: string): number {
   const map: Record<string, number> = { Q1: 1, Q2: 2, Q3: 3, Q4: 4 };
   return map[period] ?? 1;
 }
 
-export async function syncCompany(ticker: string, priceFrom?: string): Promise<{ ticker: string; earnings: number; financials: number; prices: number }> {
+async function seedCompany(ticker: string): Promise<void> {
+  // 1. Profile
   const profiles = await fmp.profile(ticker);
   const profile = profiles[0];
-  if (!profile) throw new Error(`No FMP profile for ${ticker}`);
+  if (!profile) throw new Error(`No FMP profile`);
 
   const company = await prisma.company.upsert({
     where: { ticker },
@@ -42,8 +61,8 @@ export async function syncCompany(ticker: string, priceFrom?: string): Promise<{
     },
   });
 
+  // 2. Earnings
   const earnings = await fmp.earnings(ticker, 20);
-  let earningsCount = 0;
   for (const e of earnings) {
     const reportDate = new Date(e.date);
     const epsSurprise =
@@ -93,19 +112,18 @@ export async function syncCompany(ticker: string, priceFrom?: string): Promise<{
         isUpcoming: reportDate > new Date(),
       },
     });
-    earningsCount++;
   }
 
+  // 3. Financials
   const [incomeStmts, cashFlows, balanceSheets] = await Promise.all([
-    fmp.incomeStatement(ticker, "quarter", 12),
-    fmp.cashFlow(ticker, "quarter", 12),
-    fmp.balanceSheet(ticker, "quarter", 12),
+    fmp.incomeStatement(ticker, "quarter", 20),
+    fmp.cashFlow(ticker, "quarter", 20),
+    fmp.balanceSheet(ticker, "quarter", 20),
   ]);
 
   const cashFlowMap = new Map(cashFlows.map((c) => [c.date, c]));
   const balanceSheetMap = new Map(balanceSheets.map((b) => [b.date, b]));
 
-  let financialsCount = 0;
   for (const stmt of incomeStmts) {
     const cf = cashFlowMap.get(stmt.date);
     const bs = balanceSheetMap.get(stmt.date);
@@ -149,34 +167,64 @@ export async function syncCompany(ticker: string, priceFrom?: string): Promise<{
         freeCashFlow: cf?.freeCashFlow ? BigInt(Math.round(cf.freeCashFlow)) : null,
       },
     });
-    financialsCount++;
   }
 
-  const defaultFrom = new Date();
-  defaultFrom.setFullYear(defaultFrom.getFullYear() - 2);
-  const prices = await fmp.historicalPrices(ticker, priceFrom ?? defaultFrom.toISOString().split("T")[0]);
+  // 4. Historical prices — chunked batch insert for speed
+  const prices = await fmp.historicalPrices(ticker, PRICE_FROM);
+  if (prices && prices.length > 0) {
+    const data = prices.map((p) => ({
+      companyId: company.id,
+      date: new Date(p.date),
+      open: p.open,
+      high: p.high,
+      low: p.low,
+      close: p.close,
+      volume: BigInt(Math.round(p.volume)),
+      adjClose: p.close,
+    }));
 
-  let priceCount = 0;
-  for (const p of prices ?? []) {
-    await prisma.stockPrice.upsert({
-      where: { companyId_date: { companyId: company.id, date: new Date(p.date) } },
-      create: {
-        companyId: company.id,
-        date: new Date(p.date),
-        open: p.open,
-        high: p.high,
-        low: p.low,
-        close: p.close,
-        volume: BigInt(Math.round(p.volume)),
-        adjClose: p.close,
-      },
-      update: {
-        close: p.close,
-        volume: BigInt(Math.round(p.volume)),
-      },
-    });
-    priceCount++;
+    const CHUNK = 500;
+    for (let i = 0; i < data.length; i += CHUNK) {
+      await prisma.stockPrice.createMany({
+        data: data.slice(i, i + CHUNK),
+        skipDuplicates: true,
+      });
+    }
   }
-
-  return { ticker, earnings: earningsCount, financials: financialsCount, prices: priceCount };
 }
+
+async function main() {
+  const tickers = SP500_TICKERS;
+  console.log(`Seeding ${tickers.length} S&P 500 companies from ${PRICE_FROM}...\n`);
+
+  const failed: string[] = [];
+
+  for (let i = 0; i < tickers.length; i++) {
+    const ticker = tickers[i];
+    process.stdout.write(`[${String(i + 1).padStart(3)}/${tickers.length}] ${ticker.padEnd(6)}`);
+
+    try {
+      await seedCompany(ticker);
+      process.stdout.write(" ✓\n");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message.split("\n")[0] : String(err);
+      process.stdout.write(` ✗ ${msg}\n`);
+      failed.push(ticker);
+    }
+
+    await sleep(DELAY_MS);
+  }
+
+  console.log(`\n--- Done ---`);
+  console.log(`Succeeded: ${tickers.length - failed.length}`);
+  if (failed.length > 0) {
+    console.log(`Failed (${failed.length}): ${failed.join(", ")}`);
+  }
+
+  await prisma.$disconnect();
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

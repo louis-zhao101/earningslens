@@ -92,6 +92,17 @@ export interface FMPSearchResult {
   exchangeFullName: string;
 }
 
+export interface FMPSP500Constituent {
+  symbol: string;
+  name: string;
+  sector: string;
+  subSector: string;
+  headQuarter: string;
+  dateFirstAdded: string;
+  cik: string;
+  founded: string;
+}
+
 export const fmp = {
   profile: (ticker: string) =>
     get<FMPProfile[]>(`/profile`, { symbol: ticker }),
@@ -135,4 +146,7 @@ export const fmp = {
       ...(from ? { from } : {}),
       ...(to ? { to } : {}),
     }),
+
+  sp500Constituents: () =>
+    get<FMPSP500Constituent[]>(`/sp500-constituent`),
 };
