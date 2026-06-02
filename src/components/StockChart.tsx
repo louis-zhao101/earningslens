@@ -89,6 +89,7 @@ export default function StockChart({ candles, earningsMarkers = [] }: Props) {
         background: { color: "transparent" },
         textColor: "#a1a1aa",
         fontFamily: "monospace",
+        attributionLogo: false,
       },
       grid: {
         vertLines: { color: "#27272a" },
@@ -159,6 +160,9 @@ export default function StockChart({ candles, earningsMarkers = [] }: Props) {
     chartRef.current = chart;
     seriesRef.current = series;
 
+    // fitContent first so markers are included in the initial render,
+    // then zoom to the selected time frame
+    chart.timeScale().fitContent();
     applyTimeFrame(chart, candles, timeFrame);
 
     const observer = new ResizeObserver(() => {
