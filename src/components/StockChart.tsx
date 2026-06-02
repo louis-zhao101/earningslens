@@ -1,14 +1,16 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+
+import { useState, useMemo } from "react";
 import {
-  createChart,
-  createSeriesMarkers,
-  CandlestickSeries,
-  type IChartApi,
-  type ISeriesApi,
-  type CandlestickData,
-  type Time,
-} from "lightweight-charts";
+  ResponsiveContainer,
+  ComposedChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ReferenceLine,
+} from "recharts";
 
 interface Candle {
   time: string;
@@ -32,7 +34,6 @@ interface Props {
 
 const TIME_FRAMES = ["1M", "3M", "6M", "1YR", "2YR", "5YR", "YTD"] as const;
 type TimeFrame = typeof TIME_FRAMES[number];
-const DEFAULT_TF: TimeFrame = "1YR";
 
 function getFromDate(tf: TimeFrame): string {
   const now = new Date();
@@ -49,143 +50,123 @@ function getFromDate(tf: TimeFrame): string {
   return d.toISOString().split("T")[0];
 }
 
-function applyTimeFrame(chart: IChartApi, candles: Candle[], tf: TimeFrame) {
-  if (candles.length === 0) return;
-  const fromDate = getFromDate(tf);
-  const toDate = candles[candles.length - 1].time;
-  const fromCandle = candles.find((c) => c.time >= fromDate);
-  chart.timeScale().setVisibleRange({
-    from: (fromCandle?.time ?? fromDate) as Time,
-    to: toDate as Time,
-  });
-}
-
 function fmtChange(val: number | null): string {
   if (val == null) return "";
   const sign = val >= 0 ? "+" : "";
   return `${sign}${val.toFixed(1)}%`;
 }
 
-function markerText(m: EarningsMarker): string {
-  const pre = fmtChange(m.beforeChange);
-  const post = fmtChange(m.afterChange);
-  if (pre && post) return `${pre} → ${post}`;
-  if (post) return post;
-  if (pre) return pre;
-  return "";
+function formatDateShort(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function formatDateFull(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+// Custom earnings reference line label
+function EarningsLabel({
+  viewBox,
+  beat,
+  beforeChange,
+  afterChange,
+}: {
+  viewBox?: { x: number; y: number; height: number };
+  beat: boolean | null;
+  beforeChange: number | null;
+  afterChange: number | null;
+}) {
+  if (!viewBox) return null;
+  const { x, y } = viewBox;
+  const color = beat === true ? "#34d399" : beat === false ? "#f87171" : "#a1a1aa";
+  const pre = fmtChange(beforeChange);
+  const post = fmtChange(afterChange);
+
+  return (
+    <g>
+      {/* Circle marker */}
+      <circle cx={x} cy={y + 12} r={5} fill={color} />
+      {/* Price change text above */}
+      {pre && (
+        <text x={x} y={y - 18} fill="#71717a" fontSize={9} textAnchor="middle">
+          {pre}
+        </text>
+      )}
+      {post && (
+        <text x={x} y={y - 6} fill={color} fontSize={9} textAnchor="middle">
+          {post}
+        </text>
+      )}
+    </g>
+  );
+}
+
+// Custom tooltip
+function ChartTooltip({
+  active,
+  payload,
+  earningsMap,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload: { time: string; close: number } }>;
+  earningsMap: Map<string, EarningsMarker>;
+}) {
+  if (!active || !payload?.length) return null;
+  const { time, close } = payload[0].payload;
+  const earnings = earningsMap.get(time);
+
+  return (
+    <div className="rounded border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs shadow-lg">
+      <div className="mb-1 font-medium text-zinc-300">{formatDateFull(time)}</div>
+      <div className="text-white">Close: <span className="font-mono">${close.toFixed(2)}</span></div>
+      {earnings && (
+        <div className="mt-1 border-t border-zinc-700 pt-1 space-y-0.5">
+          <div className={earnings.beat === true ? "text-emerald-400" : earnings.beat === false ? "text-red-400" : "text-zinc-400"}>
+            Earnings {earnings.beat === true ? "Beat ↑" : earnings.beat === false ? "Miss ↓" : ""}
+          </div>
+          {earnings.beforeChange != null && (
+            <div className="text-zinc-400">Week before: <span className={earnings.beforeChange >= 0 ? "text-emerald-400" : "text-red-400"}>{fmtChange(earnings.beforeChange)}</span></div>
+          )}
+          {earnings.afterChange != null && (
+            <div className="text-zinc-400">Week after: <span className={earnings.afterChange >= 0 ? "text-emerald-400" : "text-red-400"}>{fmtChange(earnings.afterChange)}</span></div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function StockChart({ candles, earningsMarkers = [] }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const [timeFrame, setTimeFrame] = useState<TimeFrame>(DEFAULT_TF);
+  const [timeFrame, setTimeFrame] = useState<TimeFrame>("1YR");
 
-  useEffect(() => {
-    if (!containerRef.current || candles.length === 0) return;
+  const filtered = useMemo(() => {
+    const from = getFromDate(timeFrame);
+    return candles.filter((c) => c.time >= from);
+  }, [candles, timeFrame]);
 
-    const chart = createChart(containerRef.current, {
-      layout: {
-        background: { color: "transparent" },
-        textColor: "#a1a1aa",
-        fontFamily: "monospace",
-        attributionLogo: false,
-      },
-      grid: {
-        vertLines: { color: "#27272a" },
-        horzLines: { color: "#27272a" },
-      },
-      crosshair: { mode: 1 },
-      rightPriceScale: { borderColor: "#3f3f46" },
-      timeScale: { borderColor: "#3f3f46", timeVisible: true },
-      width: containerRef.current.clientWidth,
-      height: 380,
-    });
+  const earningsMap = useMemo(
+    () => new Map(earningsMarkers.map((m) => [m.time, m])),
+    [earningsMarkers]
+  );
 
-    const series = chart.addSeries(CandlestickSeries, {
-      upColor: "#34d399",
-      downColor: "#f87171",
-      borderUpColor: "#34d399",
-      borderDownColor: "#f87171",
-      wickUpColor: "#34d399",
-      wickDownColor: "#f87171",
-    });
+  const visibleEarnings = useMemo(() => {
+    if (filtered.length === 0) return [];
+    const from = filtered[0].time;
+    const to = filtered[filtered.length - 1].time;
+    return earningsMarkers.filter((m) => m.time >= from && m.time <= to);
+  }, [filtered, earningsMarkers]);
 
-    const data: CandlestickData[] = candles.map((c) => ({
-      time: c.time as Time,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    }));
+  // Compute Y axis domain with padding for labels
+  const prices = filtered.map((c) => c.close);
+  const minP = Math.min(...prices);
+  const maxP = Math.max(...prices);
+  const pad = (maxP - minP) * 0.12;
+  const yDomain: [number, number] = [minP - pad, maxP + pad];
 
-    series.setData(data);
-
-    if (earningsMarkers.length > 0) {
-      const candleTimes = new Set(candles.map((c) => c.time));
-      const sortedCandleTimes = [...candleTimes].sort();
-
-      const markerData = earningsMarkers
-        .map((m) => {
-          // find exact match or nearest prior candle
-          let time = m.time;
-          if (!candleTimes.has(time)) {
-            let nearest = "";
-            for (let i = sortedCandleTimes.length - 1; i >= 0; i--) {
-              if (sortedCandleTimes[i] <= time) { nearest = sortedCandleTimes[i]; break; }
-            }
-            if (!nearest) return null;
-            time = nearest;
-          }
-          return { time, beat: m.beat, beforeChange: m.beforeChange, afterChange: m.afterChange };
-        })
-        .filter((m): m is NonNullable<typeof m> => m !== null);
-
-      if (markerData.length > 0) {
-        createSeriesMarkers(
-          series,
-          markerData.map((m) => ({
-            time: m.time as Time,
-            position: "aboveBar" as const,
-            color: m.beat === true ? "#34d399" : m.beat === false ? "#f87171" : "#a1a1aa",
-            shape: "circle" as const,
-            text: markerText(m),
-            size: 2,
-          })),
-          { zOrder: "top" }
-        );
-      }
-    }
-
-    chartRef.current = chart;
-    seriesRef.current = series;
-
-    // fitContent first so markers are included in the initial render,
-    // then zoom to the selected time frame
-    chart.timeScale().fitContent();
-    applyTimeFrame(chart, candles, timeFrame);
-
-    const observer = new ResizeObserver(() => {
-      if (containerRef.current) {
-        chart.applyOptions({ width: containerRef.current.clientWidth });
-      }
-    });
-    observer.observe(containerRef.current);
-
-    return () => {
-      observer.disconnect();
-      chart.remove();
-      chartRef.current = null;
-      seriesRef.current = null;
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candles, earningsMarkers]);
-
-  useEffect(() => {
-    if (chartRef.current) {
-      applyTimeFrame(chartRef.current, candles, timeFrame);
-    }
-  }, [timeFrame, candles]);
+  // Tick count based on timeframe
+  const xTickCount = timeFrame === "1M" ? 8 : timeFrame === "3M" ? 6 : timeFrame === "6M" ? 6 : 8;
 
   if (candles.length === 0) {
     return (
@@ -212,7 +193,56 @@ export default function StockChart({ candles, earningsMarkers = [] }: Props) {
           </button>
         ))}
       </div>
-      <div ref={containerRef} className="w-full" />
+
+      <ResponsiveContainer width="100%" height={380}>
+        <ComposedChart data={filtered} margin={{ top: 36, right: 12, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+          <XAxis
+            dataKey="time"
+            tickLine={false}
+            axisLine={{ stroke: "#3f3f46" }}
+            tick={{ fill: "#71717a", fontSize: 11 }}
+            tickFormatter={formatDateShort}
+            interval={Math.floor(filtered.length / xTickCount)}
+          />
+          <YAxis
+            domain={yDomain}
+            tickLine={false}
+            axisLine={false}
+            tick={{ fill: "#71717a", fontSize: 11 }}
+            tickFormatter={(v: number) => `$${v.toFixed(0)}`}
+            width={52}
+          />
+          <Tooltip
+            content={<ChartTooltip earningsMap={earningsMap} />}
+            cursor={{ stroke: "#52525b", strokeWidth: 1 }}
+          />
+          <Line
+            type="monotone"
+            dataKey="close"
+            stroke="#34d399"
+            strokeWidth={1.5}
+            dot={false}
+            activeDot={{ r: 3, fill: "#34d399" }}
+          />
+          {visibleEarnings.map((m) => (
+            <ReferenceLine
+              key={m.time}
+              x={m.time}
+              stroke={m.beat === true ? "#34d399" : m.beat === false ? "#f87171" : "#71717a"}
+              strokeWidth={1}
+              strokeDasharray="3 3"
+              label={
+                <EarningsLabel
+                  beat={m.beat}
+                  beforeChange={m.beforeChange}
+                  afterChange={m.afterChange}
+                />
+              }
+            />
+          ))}
+        </ComposedChart>
+      </ResponsiveContainer>
     </div>
   );
 }
