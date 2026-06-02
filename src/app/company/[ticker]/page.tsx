@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { syncCompany } from "@/lib/sync";
 import CompanyHeader from "@/components/CompanyHeader";
 import EarningsTable from "@/components/EarningsTable";
 import FinancialsTable from "@/components/FinancialsTable";
@@ -51,7 +52,15 @@ export default async function CompanyPage({ params }: Props) {
   const { ticker } = await params;
   const upper = ticker.toUpperCase();
 
-  const company = await getCompany(upper);
+  let company = await getCompany(upper);
+  if (!company) {
+    try {
+      await syncCompany(upper);
+      company = await getCompany(upper);
+    } catch {
+      // FMP had no data for this ticker
+    }
+  }
   if (!company) notFound();
 
   const [earnings, financials, prices] = await Promise.all([
