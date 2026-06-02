@@ -1,0 +1,103 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Company {
+  id             String               @id @default(cuid())
+  ticker         String               @unique
+  name           String
+  sector         String?
+  industry       String?
+  marketCap      BigInt?
+  exchange       String?
+  description    String?
+  website        String?
+  employees      Int?
+  country        String?              @default("US")
+  logo           String?
+  ceo            String?
+  ipoDate        DateTime?
+  updatedAt      DateTime             @updatedAt
+  earningsEvents EarningsEvent[]
+  stockPrices    StockPrice[]
+  financials     FinancialStatement[]
+}
+
+model EarningsEvent {
+  id                 String   @id @default(cuid())
+  companyId          String
+  company            Company  @relation(fields: [companyId], references: [id])
+  reportDate         DateTime
+  fiscalPeriod       String
+  fiscalQuarter      Int?
+  fiscalYear         Int?
+  callTime           String?
+  epsEstimate        Float?
+  epsActual          Float?
+  epsSurprise        Float?
+  epsSurprisePct     Float?
+  revenueEstimate    BigInt?
+  revenueActual      BigInt?
+  revenueSurprise    BigInt?
+  revenueSurprisePct Float?
+  isConfirmed        Boolean  @default(false)
+  isUpcoming         Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([reportDate])
+}
+
+model StockPrice {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  date      DateTime
+  open      Float
+  high      Float
+  low       Float
+  close     Float
+  volume    BigInt
+  adjClose  Float?
+
+  @@unique([companyId, date])
+  @@index([companyId, date])
+}
+
+model FinancialStatement {
+  id              String    @id @default(cuid())
+  companyId       String
+  company         Company   @relation(fields: [companyId], references: [id])
+  period          String
+  fiscalYear      Int
+  fiscalQuarter   Int?
+  revenue         BigInt?
+  grossProfit     BigInt?
+  operatingIncome BigInt?
+  netIncome       BigInt?
+  eps             Float?
+  ebitda          BigInt?
+  totalAssets     BigInt?
+  totalDebt       BigInt?
+  freeCashFlow    BigInt?
+  reportedDate    DateTime?
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([companyId, period, fiscalYear, fiscalQuarter])
+}
+
+model MacroIndicator {
+  id     String   @id @default(cuid())
+  series String
+  date   DateTime
+  value  Float
+  unit   String?
+
+  @@unique([series, date])
+  @@index([series, date])
+}
