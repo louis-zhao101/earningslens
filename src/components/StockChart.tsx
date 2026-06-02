@@ -150,7 +150,8 @@ export default function StockChart({ candles, earningsMarkers = [] }: Props) {
             shape: "circle" as const,
             text: markerText(m),
             size: 2,
-          }))
+          })),
+          { zOrder: "top" }
         );
       }
     }
