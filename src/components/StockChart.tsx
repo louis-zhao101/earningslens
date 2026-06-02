@@ -1,10 +1,11 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createChart,
   createSeriesMarkers,
   CandlestickSeries,
   type IChartApi,
+  type ISeriesApi,
   type CandlestickData,
   type Time,
 } from "lightweight-charts";
@@ -27,9 +28,42 @@ interface Props {
   earningsMarkers?: EarningsMarker[];
 }
 
+const TIME_FRAMES = ["1D", "1W", "1M", "3M", "6M", "1YR", "2YR", "5YR", "YTD"] as const;
+type TimeFrame = typeof TIME_FRAMES[number];
+
+function getFromDate(tf: TimeFrame): string {
+  const now = new Date();
+  const d = new Date(now);
+  switch (tf) {
+    case "1D":  d.setDate(d.getDate() - 1); break;
+    case "1W":  d.setDate(d.getDate() - 7); break;
+    case "1M":  d.setMonth(d.getMonth() - 1); break;
+    case "3M":  d.setMonth(d.getMonth() - 3); break;
+    case "6M":  d.setMonth(d.getMonth() - 6); break;
+    case "1YR": d.setFullYear(d.getFullYear() - 1); break;
+    case "2YR": d.setFullYear(d.getFullYear() - 2); break;
+    case "5YR": d.setFullYear(d.getFullYear() - 5); break;
+    case "YTD": return `${now.getFullYear()}-01-01`;
+  }
+  return d.toISOString().split("T")[0];
+}
+
+function applyTimeFrame(chart: IChartApi, candles: Candle[], tf: TimeFrame) {
+  if (candles.length === 0) return;
+  const fromDate = getFromDate(tf);
+  const toDate = candles[candles.length - 1].time;
+  const fromCandle = candles.find((c) => c.time >= fromDate);
+  chart.timeScale().setVisibleRange({
+    from: (fromCandle?.time ?? fromDate) as Time,
+    to: toDate as Time,
+  });
+}
+
 export default function StockChart({ candles, earningsMarkers = [] }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const [timeFrame, setTimeFrame] = useState<TimeFrame>("1W");
 
   useEffect(() => {
     if (!containerRef.current || candles.length === 0) return;
@@ -86,8 +120,10 @@ export default function StockChart({ candles, earningsMarkers = [] }: Props) {
       );
     }
 
-    chart.timeScale().fitContent();
     chartRef.current = chart;
+    seriesRef.current = series;
+
+    applyTimeFrame(chart, candles, timeFrame);
 
     const observer = new ResizeObserver(() => {
       if (containerRef.current) {
@@ -100,8 +136,17 @@ export default function StockChart({ candles, earningsMarkers = [] }: Props) {
       observer.disconnect();
       chart.remove();
       chartRef.current = null;
+      seriesRef.current = null;
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candles, earningsMarkers]);
+
+  // Update visible range when time frame changes (without recreating chart)
+  useEffect(() => {
+    if (chartRef.current) {
+      applyTimeFrame(chartRef.current, candles, timeFrame);
+    }
+  }, [timeFrame, candles]);
 
   if (candles.length === 0) {
     return (
@@ -111,5 +156,24 @@ export default function StockChart({ candles, earningsMarkers = [] }: Props) {
     );
   }
 
-  return <div ref={containerRef} className="w-full" />;
+  return (
+    <div>
+      <div className="mb-3 flex gap-1">
+        {TIME_FRAMES.map((tf) => (
+          <button
+            key={tf}
+            onClick={() => setTimeFrame(tf)}
+            className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+              timeFrame === tf
+                ? "bg-emerald-500/20 text-emerald-400"
+                : "text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            {tf}
+          </button>
+        ))}
+      </div>
+      <div ref={containerRef} className="w-full" />
+    </div>
+  );
 }

@@ -40,14 +40,6 @@ function getWeekRange(weekOffset: number): { weekStart: Date; weekEnd: Date; wee
   return { weekStart: monday, weekEnd: sunday, weekLabel };
 }
 
-function marketCapTier(marketCap: bigint | number | null): { label: string; color: string } | null {
-  if (!marketCap) return null;
-  const n = Number(marketCap);
-  if (n >= 200e9) return { label: "Mega", color: "text-violet-400 bg-violet-400/10" };
-  if (n >= 10e9)  return { label: "Large", color: "text-blue-400 bg-blue-400/10" };
-  if (n >= 2e9)   return { label: "Mid", color: "text-cyan-400 bg-cyan-400/10" };
-  return { label: "Small", color: "text-zinc-400 bg-zinc-400/10" };
-}
 
 function surpriseBorderClass(pct: number | null | undefined): string {
   if (pct == null) return "border-l-2 border-l-zinc-800";
@@ -197,7 +189,7 @@ export default async function CalendarPage({ searchParams }: Props) {
                           <th className="w-1 p-0" />
                           <th className="px-4 py-2.5">Company</th>
                           <th className="px-4 py-2.5">Sector</th>
-                          <th className="px-4 py-2.5">Mkt Cap</th>
+                          <th className="px-4 py-2.5">Market Cap</th>
                           <th className="px-4 py-2.5 text-right">Time</th>
                           <th className="px-4 py-2.5 text-right">EPS Est.</th>
                           {isPast && <th className="px-4 py-2.5 text-right">EPS Act.</th>}
@@ -209,7 +201,6 @@ export default async function CalendarPage({ searchParams }: Props) {
                       </thead>
                       <tbody className="divide-y divide-zinc-800/60">
                         {dayEvents.map((e) => {
-                          const tier = marketCapTier(e.company.marketCap);
                           const borderClass = isPast && e.isConfirmed
                             ? surpriseBorderClass(e.epsSurprisePct)
                             : "border-l-2 border-l-zinc-800";
@@ -231,14 +222,8 @@ export default async function CalendarPage({ searchParams }: Props) {
                               <td className="px-4 py-3 text-zinc-500 text-xs">
                                 {e.company.sector ?? "—"}
                               </td>
-                              <td className="px-4 py-3">
-                                {tier ? (
-                                  <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${tier.color}`}>
-                                    {tier.label}
-                                  </span>
-                                ) : (
-                                  <span className="text-zinc-600">—</span>
-                                )}
+                              <td className="px-4 py-3 text-xs text-zinc-400">
+                                {e.company.marketCap != null ? formatLargeNumber(e.company.marketCap) : "—"}
                               </td>
                               <td className="px-4 py-3 text-right text-xs uppercase text-zinc-600">
                                 {e.callTime ?? "—"}
